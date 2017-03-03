@@ -1,0 +1,8 @@
+  DigitModuleLabel: daq
+  HitModuleLabel: gaushit
+
+  MakeShortedRegionPlot: false	
+  Make2DHistos: true
+
+  HitMultiplicityCut: 1
+  HitRMSCut: 6  
