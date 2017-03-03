@@ -95,14 +95,19 @@ int main(int argv, char** argc) {
 
   std::unordered_map<raw::ChannelID_t,size_t> nhits_map;  
 
+  size_t n_evts=0;
   for (gallery::Event ev(filenames) ; !ev.atEnd(); ev.next()) {
+
+    std::cout << "Processing event " << n_evts << std::endl;
     
+    nhits_map.clear();
+   
     auto const& hit_handle = ev.getValidHandle< std::vector<recob::Hit> >(hit_tag);
     auto const& hitVec = *hit_handle;
 
     for(auto const& hit : hitVec){
 
-      if(hit.Multiplicity() > hitMultiplicityCut &&
+      if(hit.Multiplicity() <= hitMultiplicityCut &&
 	 hit.RMS() < hitRMSCut ){
 	nt_hits->Fill(ev.eventAuxiliary().run(),
 		      ev.eventAuxiliary().subRun(),
@@ -148,9 +153,13 @@ int main(int argv, char** argc) {
 		  rms,
 		  nhits_map[digit.Channel()]);
     }
+
+    ++n_evts;
     
   } //end loop over events!
 
+  std::cout << "Processed " << n_evts << " events." << std::endl;
+  
 
   //and ... write to file!
   f_output.Write();
