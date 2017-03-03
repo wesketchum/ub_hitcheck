@@ -18,6 +18,7 @@ LDFLAGS=$$(root-config --libs) \
         -L $(CANVAS_LIB) -l canvas_Utilities -l canvas_Persistency_Common -l canvas_Persistency_Provenance \
         -L $(CETLIB_LIB) -l cetlib \
         -L $(GALLERY_LIB) -l gallery \
+        -L $(FHICLCPP_LIB) -l fhiclcpp \
         -L $(NUSIMDATA_LIB) -l nusimdata_SimulationBase \
         -L $(LARCOREOBJ_LIB) -l larcoreobj_SummaryData \
         -L $(LARDATAOBJ_LIB) -l lardataobj_Simulation -l lardataobj_RecoBase -l lardataobj_MCBase -l lardataobj_RawData -l lardataobj_OpticalDetectorData -l lardataobj_AnalysisBase
