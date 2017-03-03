@@ -1,8 +1,9 @@
-  DigitModuleLabel: daq
+  DigitModuleLabel: digitfilter
   HitModuleLabel: gaushit
 
   MakeShortedRegionPlot: false	
   Make2DHistos: true
 
   HitMultiplicityCut: 1
-  HitRMSCut: 6  
+  HitRMSCut: 6
+  EventsFFTPerRun: 5

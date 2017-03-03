@@ -19,6 +19,7 @@
 #include "TFile.h"
 #include "TNtuple.h"
 #include "TClonesArray.h"
+#include "TVirtualFFT.h"
 
 //"art" includes (canvas, and gallery)
 #include "canvas/Utilities/InputTag.h"
@@ -59,6 +60,7 @@ int main(int argv, char** argc) {
   art::InputTag hit_tag = pset.get<art::InputTag>("HitModuleLabel");
   bool makeShortedRegionPlot = pset.get<bool>("MakeShortedRegionPlot",false);
   bool make2DHistos = pset.get<bool>("Make2DHistos",false);
+  size_t nEventsFFTPerRun = pset.get<size_t>("EventsFFTPerRun");
 
   int hitMultiplicityCut = pset.get<int>("HitMultiplicityCut");
   int hitRMSCut = pset.get<int>("HitRMSCut");
@@ -81,9 +83,13 @@ int main(int argv, char** argc) {
     h_V_ph_ch = new TH2F("h_V_ph_ch","V Plane; Channel; Hit Pulse Amplitude",2400,2399.5,4799.5,200,0,200);
     h_Y_ph_ch = new TH2F("h_Y_ph_ch","Y Plane; Channel; Hit Pulse Amplitude",3456,4799.5,8255.5,200,0,200);
   }
+
+  TVirtualFFT *fftr2c;
+  std::vector<double> doubleVecInput,doubleVecOutput;
+  // = TVirtualFFT::FFT(1, &NDIM, "R2C EX K");
   
   TNtuple *nt_hits = new TNtuple("nt_hits","Hits Ntuple","run:subrun:ev:timestamp:ch:hit_amp:hit_integral:hit_sumadc:hit_rms:hit_mult");
-  TNtuple *nt_ch = new TNtuple("nt_ch","Channel Ntuple","run:subrun:ev:timestamp:ch:pedestal:rms:n_hits");
+  TNtuple *nt_ch = new TNtuple("nt_ch","Channel Ntuple","run:subrun:ev:timestamp:ch:pedestal:rms:n_hits:fft_m_1q:fft_m_2q:fft_m_3q:fft_m_4q");
 
 
   
@@ -96,12 +102,21 @@ int main(int argv, char** argc) {
   std::unordered_map<raw::ChannelID_t,size_t> nhits_map;  
 
   size_t n_evts=0;
+
+  bool fft_Initialize = true;
+  unsigned int prev_run = 0;
+  size_t n_evts_thisrun = 0;
+  
   for (gallery::Event ev(filenames) ; !ev.atEnd(); ev.next()) {
 
     std::cout << "Processing event " << n_evts << std::endl;
-    
     nhits_map.clear();
-   
+
+    if(ev.eventAuxiliary().run()!=prev_run){
+      n_evts_thisrun=0;
+      prev_run = ev.eventAuxiliary().run();
+    }
+    
     auto const& hit_handle = ev.getValidHandle< std::vector<recob::Hit> >(hit_tag);
     auto const& hitVec = *hit_handle;
 
@@ -137,6 +152,32 @@ int main(int argv, char** argc) {
     auto const& digitVec = *digit_handle;
     for(auto const& digit : digitVec){
 
+      float mag_1q=0, mag_2q=0, mag_3q=0, mag_4q=0;
+      
+      if(n_evts_thisrun < nEventsFFTPerRun){
+	if(fft_Initialize){
+	  int ndim = digit.ADCs().size();
+	  fftr2c = TVirtualFFT::FFT(1, &ndim, "R2C EX K");
+	  doubleVecOutput.resize(ndim);
+	  fft_Initialize = false;
+	}
+
+	doubleVecInput.assign(digit.ADCs().begin(),digit.ADCs().end());
+	fftr2c->SetPoints(doubleVecInput.data());
+	fftr2c->Transform();
+	//fftr2c->GetPoints(doubleVecOutput.data());
+
+	TH1 *hfft_m = 0;
+	hfft_m = TH1::TransformHisto(fftr2c,hfft_m,"MAG");
+
+	mag_1q = hfft_m->Integral(2,hfft_m->GetNbinsX()/8);
+	mag_2q = hfft_m->Integral(hfft_m->GetNbinsX()/8 + 1,2*hfft_m->GetNbinsX()/8);
+	mag_3q = hfft_m->Integral(2*hfft_m->GetNbinsX()/8 + 1,3*hfft_m->GetNbinsX()/8);
+	mag_4q = hfft_m->Integral(3*hfft_m->GetNbinsX()/8 + 1,4*hfft_m->GetNbinsX()/8);
+
+	delete hfft_m;
+      }
+      
       float ped = (float)std::accumulate(digit.ADCs().begin(),digit.ADCs().end(),0) / (float)(digit.ADCs().size());
       float rms = 0.0;
       std::for_each (digit.ADCs().begin(), digit.ADCs().end(), [&](const float d) {
@@ -151,7 +192,8 @@ int main(int argv, char** argc) {
 		  digit.Channel(),
 		  ped,
 		  rms,
-		  nhits_map[digit.Channel()]);
+		  nhits_map[digit.Channel()],
+		  mag_1q,mag_2q,mag_3q,mag_4q);
     }
 
     ++n_evts;
