@@ -60,8 +60,10 @@ int main(int argv, char** argc) {
   art::InputTag hit_tag = pset.get<art::InputTag>("HitModuleLabel");
   bool makeShortedRegionPlot = pset.get<bool>("MakeShortedRegionPlot",false);
   bool make2DHistos = pset.get<bool>("Make2DHistos",false);
-  size_t nEventsFFTPerRun = pset.get<size_t>("EventsFFTPerRun");
 
+  int inEventsFFTPerRun = pset.get<int>("EventsFFTPerRun");
+  size_t nEventsFFTPerRun = (inEventsFFTPerRun>0) ? inEventsFFTPerRun : 0;
+    
   int hitMultiplicityCut = pset.get<int>("HitMultiplicityCut");
   int hitRMSCut = pset.get<int>("HitRMSCut");
   
@@ -89,7 +91,7 @@ int main(int argv, char** argc) {
   // = TVirtualFFT::FFT(1, &NDIM, "R2C EX K");
   
   TNtuple *nt_hits = new TNtuple("nt_hits","Hits Ntuple","run:subrun:ev:timestamp:ch:hit_amp:hit_integral:hit_sumadc:hit_rms:hit_mult");
-  TNtuple *nt_ch = new TNtuple("nt_ch","Channel Ntuple","run:subrun:ev:timestamp:ch:pedestal:rms:n_hits:fft_m_1q:fft_m_2q:fft_m_3q:fft_m_4q");
+  TNtuple *nt_ch = new TNtuple("nt_ch","Channel Ntuple","run:subrun:ev:timestamp:ch:pedestal:rms:median:rms_trunc:n_hits:fft_m_1q:fft_m_2q:fft_m_3q:fft_m_4q");
 
 
   
@@ -102,7 +104,7 @@ int main(int argv, char** argc) {
   std::unordered_map<raw::ChannelID_t,size_t> nhits_map;  
 
   size_t n_evts=0;
-
+  
   bool fft_Initialize = true;
   unsigned int prev_run = 0;
   size_t n_evts_thisrun = 0;
@@ -152,6 +154,29 @@ int main(int argv, char** argc) {
     auto const& digitVec = *digit_handle;
     for(auto const& digit : digitVec){
 
+      doubleVecInput.assign(digit.ADCs().begin(),digit.ADCs().end());
+
+      //sort to get median
+      std::nth_element(doubleVecInput.begin(),doubleVecInput.begin()+(doubleVecInput.size()/2),doubleVecInput.end());
+      float median = *(doubleVecInput.begin()+(doubleVecInput.size()/2));
+
+      //sort to get first and third quartile
+      std::nth_element(doubleVecInput.begin(),doubleVecInput.begin()+(doubleVecInput.size()/4),doubleVecInput.begin()+(doubleVecInput.size()/2));
+      std::nth_element(doubleVecInput.begin()+(doubleVecInput.size()/2),doubleVecInput.begin()+(3*doubleVecInput.size()/4),doubleVecInput.end());
+
+      float q1 = *(doubleVecInput.begin()+(doubleVecInput.size()/4));
+      float q3 = *(doubleVecInput.begin()+(3*doubleVecInput.size()/4));
+
+      float rms_trunc = std::sqrt(0.5*((q1-median)*(q1-median) + (q3-median)*(q3-median))) / 0.6745;
+      
+      float ped = (float)std::accumulate(digit.ADCs().begin(),digit.ADCs().end(),0) / (float)(digit.ADCs().size());
+      float rms = 0.0;
+      std::for_each (digit.ADCs().begin(), digit.ADCs().end(), [&](const float d) {
+	  rms += (d - ped) * (d - ped);
+	});
+      rms = std::sqrt(rms / digit.ADCs().size());
+
+      
       float mag_1q=0, mag_2q=0, mag_3q=0, mag_4q=0;
       
       if(n_evts_thisrun < nEventsFFTPerRun){
@@ -178,20 +203,13 @@ int main(int argv, char** argc) {
 	delete hfft_m;
       }
       
-      float ped = (float)std::accumulate(digit.ADCs().begin(),digit.ADCs().end(),0) / (float)(digit.ADCs().size());
-      float rms = 0.0;
-      std::for_each (digit.ADCs().begin(), digit.ADCs().end(), [&](const float d) {
-	  rms += (d - ped) * (d - ped);
-	});
-      rms = std::sqrt(rms / digit.ADCs().size());
-
       nt_ch->Fill(ev.eventAuxiliary().run(),
 		  ev.eventAuxiliary().subRun(),
 		  ev.eventAuxiliary().event(),
 		  ev.eventAuxiliary().time().timeHigh(),
 		  digit.Channel(),
-		  ped,
-		  rms,
+		  ped,rms,
+		  median,rms_trunc,
 		  nhits_map[digit.Channel()],
 		  mag_1q,mag_2q,mag_3q,mag_4q);
     }

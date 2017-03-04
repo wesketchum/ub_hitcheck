@@ -2,8 +2,8 @@
   HitModuleLabel: gaushit
 
   MakeShortedRegionPlot: false	
-  Make2DHistos: true
+  Make2DHistos: false
 
   HitMultiplicityCut: 1
   HitRMSCut: 6
-  EventsFFTPerRun: 5
+  EventsFFTPerRun: -1
