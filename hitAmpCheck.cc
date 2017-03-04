@@ -62,7 +62,7 @@ int main(int argv, char** argc) {
   bool make2DHistos = pset.get<bool>("Make2DHistos",false);
 
   int inEventsFFTPerRun = pset.get<int>("EventsFFTPerRun");
-  size_t nEventsFFTPerRun = (inEventsFFTPerRun>0) ? inEventsFFTPerRun : 0;
+  size_t nEventsFFTPerRun = (inEventsFFTPerRun>0) ? inEventsFFTPerRun : 999999;
     
   int hitMultiplicityCut = pset.get<int>("HitMultiplicityCut");
   int hitRMSCut = pset.get<int>("HitRMSCut");
@@ -89,9 +89,34 @@ int main(int argv, char** argc) {
   TVirtualFFT *fftr2c;
   std::vector<double> doubleVecInput,doubleVecOutput;
   // = TVirtualFFT::FFT(1, &NDIM, "R2C EX K");
-  
+
   TNtuple *nt_hits = new TNtuple("nt_hits","Hits Ntuple","run:subrun:ev:timestamp:ch:hit_amp:hit_integral:hit_sumadc:hit_rms:hit_mult");
-  TNtuple *nt_ch = new TNtuple("nt_ch","Channel Ntuple","run:subrun:ev:timestamp:ch:pedestal:rms:median:rms_trunc:n_hits:fft_m_1q:fft_m_2q:fft_m_3q:fft_m_4q");
+
+  typedef struct chTreeObj{
+    unsigned int run;
+    unsigned int subrun;
+    unsigned int ev;
+    unsigned int timestamp;
+    unsigned int ch;
+    float pedestal;
+    float rms;
+    float median;
+    float rms_trunc;
+    int n_hits;
+    float fft_m_1q;
+    float fft_m_2q;
+    float fft_m_3q;
+    float fft_m_4q;
+    float fft_m_1q_trunc;
+    float fft_m_2q_trunc;
+    float fft_m_3q_trunc;
+    float fft_m_4q_trunc; 
+  } chTreeObj_t;
+
+  chTreeObj_t chTreeData;
+
+  TTree *nt_ch = new TTree("nt_ch","Channel Ntuple");
+  nt_ch->Branch("",&chTreeData,"run/i:subrun/i:ev/i:timestamp/i:ch/i:pedestal/F:rms/F:median/F:rms_trunc/F:n_hits/I:fft_m_1q/F:fft_m_2q/F:fft_m_3q/F:fft_m_4q/F:fft_m_1q_trunc/F:fft_m_2q_trunc/F:fft_m_3q_trunc/F:fft_m_4q_trunc/F");
 
 
   
@@ -150,15 +175,30 @@ int main(int argv, char** argc) {
       
     }//end loop over hits
 
+    chTreeData.run = ev.eventAuxiliary().run();
+    chTreeData.subrun = ev.eventAuxiliary().subRun();
+    chTreeData.ev = ev.eventAuxiliary().event();
+    chTreeData.timestamp = ev.eventAuxiliary().time().timeHigh();
+    chTreeData.fft_m_1q=-1;
+    chTreeData.fft_m_2q=-1;
+    chTreeData.fft_m_3q=-1;
+    chTreeData.fft_m_4q=-1;
+    chTreeData.fft_m_1q_trunc=-1;
+    chTreeData.fft_m_2q_trunc=-1;
+    chTreeData.fft_m_3q_trunc=-1;
+    chTreeData.fft_m_4q_trunc=-1;
+
+    
     auto const& digit_handle = ev.getValidHandle< std::vector<raw::RawDigit> >(digit_tag);
     auto const& digitVec = *digit_handle;
     for(auto const& digit : digitVec){
 
+      chTreeData.ch = digit.Channel();
       doubleVecInput.assign(digit.ADCs().begin(),digit.ADCs().end());
 
       //sort to get median
       std::nth_element(doubleVecInput.begin(),doubleVecInput.begin()+(doubleVecInput.size()/2),doubleVecInput.end());
-      float median = *(doubleVecInput.begin()+(doubleVecInput.size()/2));
+      chTreeData.median = *(doubleVecInput.begin()+(doubleVecInput.size()/2));
 
       //sort to get first and third quartile
       std::nth_element(doubleVecInput.begin(),doubleVecInput.begin()+(doubleVecInput.size()/4),doubleVecInput.begin()+(doubleVecInput.size()/2));
@@ -167,19 +207,20 @@ int main(int argv, char** argc) {
       float q1 = *(doubleVecInput.begin()+(doubleVecInput.size()/4));
       float q3 = *(doubleVecInput.begin()+(3*doubleVecInput.size()/4));
 
-      float rms_trunc = std::sqrt(0.5*((q1-median)*(q1-median) + (q3-median)*(q3-median))) / 0.6745;
+      chTreeData.rms_trunc = std::sqrt(0.5*((q1-chTreeData.median)*(q1-chTreeData.median) +
+					    (q3-chTreeData.median)*(q3-chTreeData.median))) / 0.6745;
       
-      float ped = (float)std::accumulate(digit.ADCs().begin(),digit.ADCs().end(),0) / (float)(digit.ADCs().size());
-      float rms = 0.0;
+      chTreeData.pedestal = (float)std::accumulate(digit.ADCs().begin(),digit.ADCs().end(),0) / (float)(digit.ADCs().size());
+      chTreeData.rms = 0.0;
       std::for_each (digit.ADCs().begin(), digit.ADCs().end(), [&](const float d) {
-	  rms += (d - ped) * (d - ped);
+	  chTreeData.rms += (d - chTreeData.pedestal) * (d - chTreeData.pedestal);
 	});
-      rms = std::sqrt(rms / digit.ADCs().size());
+      chTreeData.rms = std::sqrt(chTreeData.rms / digit.ADCs().size());
 
       
-      float mag_1q=0, mag_2q=0, mag_3q=0, mag_4q=0;
       
       if(n_evts_thisrun < nEventsFFTPerRun){
+	
 	if(fft_Initialize){
 	  int ndim = digit.ADCs().size();
 	  fftr2c = TVirtualFFT::FFT(1, &ndim, "R2C EX K");
@@ -190,32 +231,43 @@ int main(int argv, char** argc) {
 	doubleVecInput.assign(digit.ADCs().begin(),digit.ADCs().end());
 	fftr2c->SetPoints(doubleVecInput.data());
 	fftr2c->Transform();
-	//fftr2c->GetPoints(doubleVecOutput.data());
 
 	TH1 *hfft_m = 0;
 	hfft_m = TH1::TransformHisto(fftr2c,hfft_m,"MAG");
 
-	mag_1q = hfft_m->Integral(2,hfft_m->GetNbinsX()/8);
-	mag_2q = hfft_m->Integral(hfft_m->GetNbinsX()/8 + 1,2*hfft_m->GetNbinsX()/8);
-	mag_3q = hfft_m->Integral(2*hfft_m->GetNbinsX()/8 + 1,3*hfft_m->GetNbinsX()/8);
-	mag_4q = hfft_m->Integral(3*hfft_m->GetNbinsX()/8 + 1,4*hfft_m->GetNbinsX()/8);
+	chTreeData.fft_m_1q = hfft_m->Integral(2,hfft_m->GetNbinsX()/8);
+	chTreeData.fft_m_2q = hfft_m->Integral(hfft_m->GetNbinsX()/8 + 1,2*hfft_m->GetNbinsX()/8);
+	chTreeData.fft_m_3q = hfft_m->Integral(2*hfft_m->GetNbinsX()/8 + 1,3*hfft_m->GetNbinsX()/8);
+	chTreeData.fft_m_4q = hfft_m->Integral(3*hfft_m->GetNbinsX()/8 + 1,4*hfft_m->GetNbinsX()/8);
 
 	delete hfft_m;
+
+	doubleVecInput.assign(digit.ADCs().begin(),digit.ADCs().end());
+	for(auto & val : doubleVecInput)
+	  if( std::abs(val-chTreeData.median)>(3.5*chTreeData.rms_trunc) ) val = chTreeData.median;
+	
+	fftr2c->SetPoints(doubleVecInput.data());
+	fftr2c->Transform();
+	//fftr2c->GetPoints(doubleVecOutput.data());
+
+	TH1 *hfft_m_trunc = 0;
+	hfft_m_trunc = TH1::TransformHisto(fftr2c,hfft_m_trunc,"MAG");
+
+	chTreeData.fft_m_1q_trunc = hfft_m_trunc->Integral(2,hfft_m_trunc->GetNbinsX()/8);
+	chTreeData.fft_m_2q_trunc = hfft_m_trunc->Integral(hfft_m_trunc->GetNbinsX()/8 + 1,2*hfft_m_trunc->GetNbinsX()/8);
+	chTreeData.fft_m_3q_trunc = hfft_m_trunc->Integral(2*hfft_m_trunc->GetNbinsX()/8 + 1,3*hfft_m_trunc->GetNbinsX()/8);
+	chTreeData.fft_m_4q_trunc = hfft_m_trunc->Integral(3*hfft_m_trunc->GetNbinsX()/8 + 1,4*hfft_m_trunc->GetNbinsX()/8);
+
+	delete hfft_m_trunc;
+
       }
       
-      nt_ch->Fill(ev.eventAuxiliary().run(),
-		  ev.eventAuxiliary().subRun(),
-		  ev.eventAuxiliary().event(),
-		  ev.eventAuxiliary().time().timeHigh(),
-		  digit.Channel(),
-		  ped,rms,
-		  median,rms_trunc,
-		  nhits_map[digit.Channel()],
-		  mag_1q,mag_2q,mag_3q,mag_4q);
+      nt_ch->Fill();
     }
 
     ++n_evts;
-    
+    ++n_evts_thisrun;
+
   } //end loop over events!
 
   std::cout << "Processed " << n_evts << " events." << std::endl;
